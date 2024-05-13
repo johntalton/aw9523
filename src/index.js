@@ -86,6 +86,20 @@ export class Converter {
 		]
 	}
 
+	static encodeBits(bits, into = Uint8Array.from([ 0 ])) {
+		into[0] = 0 |
+			(bits[0] === HIGH ? 0b0000_0001 : 0) |
+			(bits[1] === HIGH ? 0b0000_0010 : 0) |
+			(bits[2] === HIGH ? 0b0000_0100 : 0) |
+			(bits[3] === HIGH ? 0b0000_1000 : 0) |
+			(bits[4] === HIGH ? 0b0001_0000 : 0) |
+			(bits[5] === HIGH ? 0b0010_0000 : 0) |
+			(bits[6] === HIGH ? 0b0100_0000 : 0) |
+			(bits[7] === HIGH ? 0b1000_0000 : 0)
+
+		return into.buffer
+	}
+
 	static decodeId(buffer) {
 		const u8 = ArrayBuffer.isView(buffer) ?
 			new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength) :
@@ -131,6 +145,8 @@ export class Converter {
 			port1Mode: mode1.mode
 		}
 	}
+
+
 }
 
 export class Common {
@@ -145,6 +161,12 @@ export class Common {
 		const buffer = await aBus.readI2cBlock(BLOCKS.PROFILE.OFFSET, BLOCKS.PROFILE.LENGTH)
 		return Converter.decodeProfile(buffer)
 	}
+
+	static async setControl(aBus) {
+
+	}
+
+
 
 	static async _getPortGeneric(aBus, port, register0, register1) {
 		const buffer = await aBus.readI2cBlock(port === 0 ? register0 : register1, BYTE_LENGTH_ONE)
@@ -171,6 +193,26 @@ export class Common {
 		return { interrupt: bitsArray.map(bit => bit === ENABLE) }
 	}
 
+
+	static async setOutput(aBus, port, output) {
+		const buffer = Converter.encodeBits(output.map(o => o ? HIGH : LOW))
+		return aBus.writeI2cBlock(port === 0 ? REGISTERS.OUTPUT_PORT_0 : REGISTERS.OUTPUT_PORT_1, buffer)
+	}
+
+	static async setDirection(aBus, port, direction) {
+		const buffer = Converter.encodeBits(direction)
+		return aBus.writeI2cBlock(port === 0 ? REGISTERS.CONFIG_PORT_0 : REGISTERS.CONFIG_PORT_1, buffer)
+	}
+
+	static async setInterrupt(aBus, port, interrupt) {
+		const buffer = Converter.encodeBits(interrupt.map(i => i ? ENABLE : DISABLE))
+		return aBus.writeI2cBlock(port === 0 ? REGISTERS.INTERRUPT_PORT_0 : REGISTERS.INPUT_PORT_1, buffer)
+	}
+
+	static async setMode(aBus, port, mode) {
+		const buffer = Converter.encodeBits(mode)
+		return aBus.writeI2cBlock(port === 0 ? REGISTERS.LED_MODE_PORT_0 : REGISTERS.LED_MODE_PORT_1, buffer)
+	}
 }
 
 export class AW9523 {
@@ -182,29 +224,33 @@ export class AW9523 {
 
 	async reset() { return Common.reset(this.#aBus) }
 
-	async getPortInput(port) { return Common.getInput(this.#aBus, port) }
+	async getInput(port) { return Common.getInput(this.#aBus, port) }
 
-	async getPortOutput(port) { return Common.getOutput(this.#aBus, port) }
+	async getOutput(port) { return Common.getOutput(this.#aBus, port) }
 
-	async setPortOutput(port) {}
+	async setOutput(port, output) { return Common.setOutput(this.#aBus, port, output) }
 
-	async getPortDirection(port) { return Common.getDirection(this.#aBus, port) }
+	async getDirection(port) { return Common.getDirection(this.#aBus, port) }
 
-	async setPortDirection(port) {}
+	async setDirection(port, direction) { return Common.setDirection(this.#aBus, port, direction)}
 
-	async getPortInterrupt(port) { return Common.getInterrupt(this.#aBus, port) }
+	async getInterrupt(port) { return Common.getInterrupt(this.#aBus, port) }
 
-	async setPortInterrupt(port) {}
+	async setInterrupt(port, interrupt) { return Common.setInterrupt(this.#aBus, port, interrupt) }
 
 	async getProfile() { return Common.getProfile(this.#aBus) }
 
-	async setProfile(profile) {}
+	async setMode(port, mode) { return Common.setMode(this.#aBus, port, mode) }
 
-	async getDimming(port, pin) {}
+	async setControl(control) { return Common.setControl(this.#aBus, control) }
 
-	async setDimming(port, pin, dim) {}
+	// async setProfile(profile) {}
 
-	async getAllDimming() {}
+	// async getDimming(port, pin) {}
 
-	async setAllDimming(dims) {}
+	// async setDimming(port, pin, dim) {}
+
+	// async getAllDimming() {}
+
+	// async setAllDimming(dims) {}
 }
