@@ -2,17 +2,20 @@ export const DEFAULT_ADDRESS = 0x58
 
 export const DEVICE_ID = 0x23
 
+export const SET = 1
+export const UNSET = 0
+
 export const HIGH = 1
 export const LOW = 0
 
-export const OUTPUT = LOW
-export const INPUT = HIGH
+export const DIRECTION_OUTPUT = UNSET
+export const DIRECTION_INPUT = SET
 
-export const ENABLE = LOW
-export const DISABLE = HIGH
+export const INTERRUPT_ENABLE = UNSET
+export const INTERRUPT_DISABLE = SET
 
-export const MODE_GPIO = HIGH
-export const MODE_LED = LOW
+export const MODE_GPIO = SET
+export const MODE_LED = UNSET
 
 export const PORT_0_DRIVE_OFFSET = 3
 
@@ -21,7 +24,12 @@ export const IMAX_RANGE_3_4 = 0b01
 export const IMAX_RANGE_2_4 = 0b10
 export const IMAX_RANGE_1_4 = 0b11
 
-
+export const DEFAULT = {
+	DIRECTION: DIRECTION_OUTPUT,
+	INTERRUPT: INTERRUPT_ENABLE,
+	MODE: MODE_GPIO,
+	OUTPUT: HIGH
+}
 
 export const BYTE_LENGTH_ONE = 1
 
@@ -60,10 +68,31 @@ export const REGISTERS = {
 	SOFT_RESET: 0x7f
 }
 
+export const PORTS = [
+	{
+		INPUT: REGISTERS.INPUT_PORT_0,
+		OUTPUT: REGISTERS.OUTPUT_PORT_0,
+		DIRECTION: REGISTERS.CONFIG_PORT_0,
+		INTERRUPT: REGISTERS.INTERRUPT_PORT_0,
+		MODE: REGISTERS.LED_MODE_PORT_0
+	},
+	{
+		INPUT: REGISTERS.INPUT_PORT_1,
+		OUTPUT: REGISTERS.OUTPUT_PORT_1,
+		DIRECTION: REGISTERS.CONFIG_PORT_1,
+		INTERRUPT: REGISTERS.INTERRUPT_PORT_1,
+		MODE: REGISTERS.LED_MODE_PORT_1
+	}
+]
+
 export const BLOCKS = {
 	PORTS: { OFFSET: REGISTERS.INPUT_PORT_0, LENGTH: 8 },
+	INPUT: { OFFSET: REGISTERS.INPUT_PORT_0, LENGTH: 2 },
+	OUTPUT: { OFFSET: REGISTERS.OUTPUT_PORT_0, LENGTH: 2 },
+	DIRECTION: { OFFSET: REGISTERS.CONFIG_PORT_0, LENGTH: 2 },
+	INTERRUPT: { OFFSET: REGISTERS.INTERRUPT_PORT_0, LENGTH: 2 },
 	PROFILE: { OFFSET: REGISTERS.ID, LENGTH: 4 },
-	DIMMING_ALL: { OFFSET: REGISTERS.DIM_0, LENGTH: 16}
+	DIMMING_ALL: { OFFSET: REGISTERS.DIM_0, LENGTH: 16 }
 }
 
 export class Converter {
@@ -166,6 +195,90 @@ export class Converter {
 			u8[12], u8[13], u8[14], u8[15],
 		]
 	}
+
+	static decodeInput(buffer) {
+		const bitsArray = Converter.decodeBits(buffer)
+		return { input: bitsArray.map(bit => bit === HIGH) }
+	}
+
+	static decodeInputs(buffer) {
+		const u8 = ArrayBuffer.isView(buffer) ?
+			new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength) :
+			new Uint8Array(buffer)
+
+		const input0 = Converter.decodeInput(u8.subarray(0, 1))
+		const input1 = Converter.decodeInput(u8.subarray(1, 2))
+
+		return {
+			input0: input0.input,
+			input1: input1.input
+		}
+	}
+
+	static encodeOutput(output) {
+		return Converter.encodeBits(output.map(o => o ? HIGH : LOW))
+	}
+
+	static decodeOutput(buffer) {
+		const bitsArray = Converter.decodeBits(buffer)
+		return { output: bitsArray.map(bit => bit === HIGH) }
+	}
+
+	static decodeOutputs(buffer) {
+		const u8 = ArrayBuffer.isView(buffer) ?
+			new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength) :
+			new Uint8Array(buffer)
+
+		const output0 = Converter.decodeOutput(u8.subarray(0, 1))
+		const output1 = Converter.decodeOutput(u8.subarray(1, 2))
+
+		return {
+			output0: output0.input,
+			output1: output1.input
+		}
+	}
+
+	static decodeDirection(buffer) {
+		const bitsArray = Converter.decodeBits(buffer)
+		return { direction: bitsArray }
+	}
+
+	static decodeDirections(buffer) {
+		const u8 = ArrayBuffer.isView(buffer) ?
+			new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength) :
+			new Uint8Array(buffer)
+
+		const direction0 = Converter.decodeDirection(u8.subarray(0, 1))
+		const direction1 = Converter.decodeDirection(u8.subarray(1, 2))
+
+		return {
+			direction0: direction0.input,
+			direction1: direction1.input
+		}
+	}
+
+	static encodeInterrupt(interrupt) {
+		return Converter.encodeBits(interrupt.map(i => i ? INTERRUPT_ENABLE : INTERRUPT_DISABLE))
+	}
+
+	static decodeInterrupt(buffer) {
+		const bitsArray = Converter.decodeBits(buffer)
+		return { interrupt: bitsArray.map(bit => bit === INTERRUPT_ENABLE) }
+	}
+
+	static decodeInterrupts(buffer) {
+		const u8 = ArrayBuffer.isView(buffer) ?
+			new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength) :
+			new Uint8Array(buffer)
+
+		const interrupt0 = Converter.decodeInterrupt(u8.subarray(0, 1))
+		const interrupt1 = Converter.decodeInterrupt(u8.subarray(1, 2))
+
+		return {
+			interrupt0: interrupt0.input,
+			interrupt1: interrupt1.input
+		}
+	}
 }
 
 export class Common {
@@ -186,57 +299,69 @@ export class Common {
 		return aBus.writeI2cBlock(REGISTERS.CONTROL, buffer)
 	}
 
-
-
-	static async _getPortGeneric(aBus, port, register0, register1) {
-		const buffer = await aBus.readI2cBlock(port === 0 ? register0 : register1, BYTE_LENGTH_ONE)
-		return Converter.decodeBits(buffer)
-	}
-
 	static async getInput(aBus, port) {
-		const bitsArray = await Common._getPortGeneric(aBus, port, REGISTERS.INPUT_PORT_0, REGISTERS.INPUT_PORT_1)
-		return { input: bitsArray.map(bit => bit === HIGH) }
+		const buffer = await aBus.readI2cBlock(PORTS[port].INPUT, BYTE_LENGTH_ONE)
+		return Converter.decodeInput(buffer)
 	}
 
 	static async getOutput(aBus, port) {
-		const bitsArray = await Common._getPortGeneric(aBus, port, REGISTERS.OUTPUT_PORT_0, REGISTERS.OUTPUT_PORT_1)
-		return { output: bitsArray.map(bit => bit === HIGH) }
+		const buffer = await aBus.readI2cBlock(PORTS[port].OUTPUT, BYTE_LENGTH_ONE)
+		return Converter.decodeOutput(buffer)
 	}
 
 	static async getDirection(aBus, port) {
-		const bitsArray = await Common._getPortGeneric(aBus, port, REGISTERS.CONFIG_PORT_0, REGISTERS.CONFIG_PORT_1)
-		return { direction: bitsArray }
+		const buffer = await aBus.readI2cBlock(PORTS[port].DIRECTION, BYTE_LENGTH_ONE)
+		return Converter.decodeDirection(buffer)
 	}
 
 	static async getInterrupt(aBus, port) {
-		const bitsArray = await Common._getPortGeneric(aBus, port, REGISTERS.INTERRUPT_PORT_0, REGISTERS.INTERRUPT_PORT_1)
-		return { interrupt: bitsArray.map(bit => bit === ENABLE) }
-	}
-
-
-	static async setOutput(aBus, port, output) {
-		const buffer = Converter.encodeBits(output.map(o => o ? HIGH : LOW))
-		return aBus.writeI2cBlock(port === 0 ? REGISTERS.OUTPUT_PORT_0 : REGISTERS.OUTPUT_PORT_1, buffer)
-	}
-
-	static async setDirection(aBus, port, direction) {
-		const buffer = Converter.encodeBits(direction)
-		return aBus.writeI2cBlock(port === 0 ? REGISTERS.CONFIG_PORT_0 : REGISTERS.CONFIG_PORT_1, buffer)
-	}
-
-	static async setInterrupt(aBus, port, interrupt) {
-		const buffer = Converter.encodeBits(interrupt.map(i => i ? ENABLE : DISABLE))
-		return aBus.writeI2cBlock(port === 0 ? REGISTERS.INTERRUPT_PORT_0 : REGISTERS.INTERRUPT_PORT_1, buffer)
-	}
-
-	static async setMode(aBus, port, mode) {
-		const buffer = Converter.encodeBits(mode)
-		return aBus.writeI2cBlock(port === 0 ? REGISTERS.LED_MODE_PORT_0 : REGISTERS.LED_MODE_PORT_1, buffer)
+		const buffer = await aBus.readI2cBlock(PORTS[port].INTERRUPT, BYTE_LENGTH_ONE)
+		return Converter.decodeInterrupt(buffer)
 	}
 
 	static async getDimmings(aBus) {
 		const buffer = await aBus.readI2cBlock(BLOCKS.DIMMING_ALL.OFFSET, BLOCKS.DIMMING_ALL.LENGTH)
 		return Converter.decodeDimmings(buffer)
+	}
+
+	static async setOutput(aBus, port, output) {
+		const buffer = Converter.encodeOutput(output)
+		return aBus.writeI2cBlock(PORTS[port].OUTPUT, buffer)
+	}
+
+	static async setDirection(aBus, port, direction) {
+		const buffer = Converter.encodeBits(direction)
+		return aBus.writeI2cBlock(PORTS[port].DIRECTION, buffer)
+	}
+
+	static async setInterrupt(aBus, port, interrupt) {
+		const buffer = Converter.encodeInterrupt(interrupt)
+		return aBus.writeI2cBlock(PORTS[port].INTERRUPT, buffer)
+	}
+
+	static async setMode(aBus, port, mode) {
+		const buffer = Converter.encodeBits(mode)
+		return aBus.writeI2cBlock(PORTS[port].MODE, buffer)
+	}
+
+	static async getInputs(aBus) {
+		const buffer = await aBus.readI2cBlock(BLOCKS.INPUT.OFFSET, BLOCKS.INPUT.LENGTH)
+		return Converter.decodeInputs(buffer)
+	}
+
+	static async getOutputs(aBus) {
+		const buffer = await aBus.readI2cBlock(BLOCKS.OUTPUT.OFFSET, BLOCKS.OUTPUT.LENGTH)
+		return Converter.decodeOutputs(buffer)
+	}
+
+	static async getDirections(aBus) {
+		const buffer = await aBus.readI2cBlock(BLOCKS.DIRECTION.OFFSET, BLOCKS.DIRECTION.LENGTH)
+		return Converter.decodeDirections(buffer)
+	}
+
+	static async getInterrupts(aBus) {
+		const buffer = await aBus.readI2cBlock(BLOCKS.INTERRUPT.OFFSET, BLOCKS.INTERRUPT.LENGTH)
+		return Converter.decodeInterrupts(buffer)
 	}
 }
 
@@ -271,19 +396,29 @@ export class AW9523 {
 
 	async setInterrupt(port, interrupt) { return Common.setInterrupt(this.#aBus, port, interrupt) }
 
-	async getProfile() { return Common.getProfile(this.#aBus) }
-
 	async setMode(port, mode) { return Common.setMode(this.#aBus, port, mode) }
+
+	// async getPorts() {}
+
+	// async getModes() {}
+
+	// async getMode(port) { return Common.getMode(this.#aBus, port) }
+
+	// async getControl() { return Common.getControl(this.#aBus) }
+
+	async getProfile() { return Common.getProfile(this.#aBus) }
 
 	async setControl(control) { return Common.setControl(this.#aBus, control) }
 
-	// async setProfile(profile) {}
-
 	// async getDimming(port, pin) {}
+
+	// async getDimming(dimId) {}
 
 	// async setDimming(port, pin, dim) {}
 
+	// async setDimming(dimId, dim) {}
+
 	async getDimmings() { return Common.getDimmings(this.#aBus) }
 
-	async setDimmings(dims) { return Common.setDimmings(this.#aBus, dims)}
+	// async setDimmings(dims) { return Common.setDimmings(this.#aBus, dims)}
 }
