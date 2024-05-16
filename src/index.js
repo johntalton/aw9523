@@ -225,8 +225,8 @@ export class Common {
 	}
 
 	static async setInterrupt(aBus, port, interrupt) {
-		const buffer = Converter.encodeBits(interrupt.map(i => i ? ENABLE : DISABLE))
-		return aBus.writeI2cBlock(port === 0 ? REGISTERS.INTERRUPT_PORT_0 : REGISTERS.INPUT_PORT_1, buffer)
+		const buffer = Uint8Array.from([ 0x00 ]) // Converter.encodeBits(interrupt.map(i => i ? ENABLE : DISABLE))
+		return aBus.writeI2cBlock(port === 0 ? REGISTERS.INTERRUPT_PORT_0 : REGISTERS.INTERRUPT_PORT_1, buffer)
 	}
 
 	static async setMode(aBus, port, mode) {
