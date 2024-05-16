@@ -121,6 +121,14 @@ export class Converter {
 		}
 	}
 
+	static encodeControl({
+		port0PushPull = false,
+		iMaxRange = IMAX_RANGE_FULL
+	}, into = Uint8Array.from([ 0x00 ])) {
+		into[0] = (port0PushPull ? (1 << PORT_0_DRIVE_OFFSET) : 0) | (iMaxRange & 0b11)
+		return into.buffer
+	}
+
 	static decodeMode(buffer) {
 		return {
 			mode: Converter.decodeBits(buffer)
@@ -146,7 +154,18 @@ export class Converter {
 		}
 	}
 
+	static decodeDimmings(buffer) {
+		const u8 = ArrayBuffer.isView(buffer) ?
+			new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength) :
+			new Uint8Array(buffer)
 
+		return [
+			u8[4], u8[5], u8[6], u8[7],
+			u8[8], u8[9], u8[10], u8[11],
+			u8[0], u8[1], u8[2], u8[3],
+			u8[12], u8[13], u8[14], u8[15],
+		]
+	}
 }
 
 export class Common {
@@ -162,8 +181,9 @@ export class Common {
 		return Converter.decodeProfile(buffer)
 	}
 
-	static async setControl(aBus) {
-
+	static async setControl(aBus, control) {
+		const buffer = Converter.encodeControl(control)
+		return aBus.writeI2cBlock(REGISTERS.CONTROL, buffer)
 	}
 
 
@@ -189,7 +209,7 @@ export class Common {
 	}
 
 	static async getInterrupt(aBus, port) {
-		const bitsArray = await Common._getPortGeneric(aBus, port, REGISTERS.INTERRUPT_PORT_0, REGISTERS.INTERRUPT_PORT_0)
+		const bitsArray = await Common._getPortGeneric(aBus, port, REGISTERS.INTERRUPT_PORT_0, REGISTERS.INTERRUPT_PORT_1)
 		return { interrupt: bitsArray.map(bit => bit === ENABLE) }
 	}
 
@@ -213,6 +233,11 @@ export class Common {
 		const buffer = Converter.encodeBits(mode)
 		return aBus.writeI2cBlock(port === 0 ? REGISTERS.LED_MODE_PORT_0 : REGISTERS.LED_MODE_PORT_1, buffer)
 	}
+
+	static async getDimmings(aBus) {
+		const buffer = await aBus.readI2cBlock(BLOCKS.DIMMING_ALL.OFFSET, BLOCKS.DIMMING_ALL.LENGTH)
+		return Converter.decodeDimmings(buffer)
+	}
 }
 
 export class AW9523 {
@@ -226,15 +251,23 @@ export class AW9523 {
 
 	async getInput(port) { return Common.getInput(this.#aBus, port) }
 
+	async getInputs() { return Common.getInputs(this.#aBus) }
+
 	async getOutput(port) { return Common.getOutput(this.#aBus, port) }
+
+	async getOutputs() { return Common.getOutputs(this.#aBus) }
 
 	async setOutput(port, output) { return Common.setOutput(this.#aBus, port, output) }
 
 	async getDirection(port) { return Common.getDirection(this.#aBus, port) }
 
+	async getDirections() { return Common.getDirections(this.#aBus) }
+
 	async setDirection(port, direction) { return Common.setDirection(this.#aBus, port, direction)}
 
 	async getInterrupt(port) { return Common.getInterrupt(this.#aBus, port) }
+
+	async getInterrupts() { return Common.getInterrupts(this.#aBus) }
 
 	async setInterrupt(port, interrupt) { return Common.setInterrupt(this.#aBus, port, interrupt) }
 
@@ -250,7 +283,7 @@ export class AW9523 {
 
 	// async setDimming(port, pin, dim) {}
 
-	// async getAllDimming() {}
+	async getDimmings() { return Common.getDimmings(this.#aBus) }
 
-	// async setAllDimming(dims) {}
+	async setDimmings(dims) { return Common.setDimmings(this.#aBus, dims)}
 }

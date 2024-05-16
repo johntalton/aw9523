@@ -7,3 +7,4 @@
 [![Downloads Per Month](http://img.shields.io/npm/dm/@johntalton/aw9523.svg)](https://www.npmjs.com/package/@johntalton/aw9523)
 ![GitHub last commit](https://img.shields.io/github/last-commit/johntalton/aw9523)
 
+An LED friendly, but also generally useful, Gpio device.
