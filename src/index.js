@@ -28,14 +28,16 @@ export const DEFAULT = {
 	DIRECTION: DIRECTION_OUTPUT,
 	INTERRUPT: INTERRUPT_ENABLE,
 	MODE: MODE_GPIO,
-	OUTPUT: HIGH
 }
+
+export const RESET_BUFFER = Uint8Array.from([ 0x00 ])
 
 export const BYTE_LENGTH_ONE = 1
 
 export const REGISTERS = {
 	INPUT_PORT_0: 0x00,
 	INPUT_PORT_1: 0x01,
+
 	OUTPUT_PORT_0: 0x02,
 	OUTPUT_PORT_1: 0x03,
 	CONFIG_PORT_0: 0x04,
@@ -86,14 +88,28 @@ export const PORTS = [
 ]
 
 export const BLOCKS = {
-	PORTS: { OFFSET: REGISTERS.INPUT_PORT_0, LENGTH: 8 },
+	PORTS_ALL: { OFFSET: REGISTERS.INPUT_PORT_0, LENGTH: 8 },
+	PORTS: { OFFSET: REGISTERS.OUTPUT_PORT_0, LENGTH: 6 },
 	INPUT: { OFFSET: REGISTERS.INPUT_PORT_0, LENGTH: 2 },
 	OUTPUT: { OFFSET: REGISTERS.OUTPUT_PORT_0, LENGTH: 2 },
 	DIRECTION: { OFFSET: REGISTERS.CONFIG_PORT_0, LENGTH: 2 },
 	INTERRUPT: { OFFSET: REGISTERS.INTERRUPT_PORT_0, LENGTH: 2 },
+	MODE: { OFFSET: REGISTERS.LED_MODE_PORT_0, LENGTH: 2 },
 	PROFILE: { OFFSET: REGISTERS.ID, LENGTH: 4 },
 	DIMMING_ALL: { OFFSET: REGISTERS.DIM_0, LENGTH: 16 }
 }
+
+
+export const DIM_REGISTER_FOR_PORT_PIN = [
+	[
+		REGISTERS.DIM_4, REGISTERS.DIM_5, REGISTERS.DIM_6, REGISTERS.DIM_7,
+		REGISTERS.DIM_8, REGISTERS.DIM_9, REGISTERS.DIM_10, REGISTERS.DIM_11
+	],
+	[
+		REGISTERS.DIM_0, REGISTERS.DIM_1, REGISTERS.DIM_2, REGISTERS.DIM_3,
+		REGISTERS.DIM_12, REGISTERS.DIM_13, REGISTERS.DIM_14, REGISTERS.DIM_15
+	]
+]
 
 export class Converter {
 	static decodeBits(buffer) {
@@ -164,6 +180,17 @@ export class Converter {
 		}
 	}
 
+	static decodeModes(buffer) {
+		const u8 = ArrayBuffer.isView(buffer) ?
+			new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength) :
+			new Uint8Array(buffer)
+
+		const mode0 = Converter.decodeMode(u8.subarray(0, 1))
+		const mode1 = Converter.decodeMode(u8.subarray(1, 2))
+
+		return [ ...mode0.mode, ...mode1.mode ]
+	}
+
 	static decodeProfile(buffer) {
 		const u8 = ArrayBuffer.isView(buffer) ?
 			new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength) :
@@ -171,15 +198,13 @@ export class Converter {
 
 		const id = Converter.decodeId(u8.subarray(0, 1))
 		const control = Converter.decodeControl(u8.subarray(1, 2))
-		const mode0 = Converter.decodeMode(u8.subarray(2, 3))
-		const mode1 = Converter.decodeMode(u8.subarray(3, 4))
+		const mode = Converter.decodeModes(u8.subarray(2, 4))
 
 		return {
 			...control,
 
 			id,
-			port0Mode: mode0.mode,
-			port1Mode: mode1.mode
+			mode
 		}
 	}
 
@@ -209,10 +234,7 @@ export class Converter {
 		const input0 = Converter.decodeInput(u8.subarray(0, 1))
 		const input1 = Converter.decodeInput(u8.subarray(1, 2))
 
-		return {
-			input0: input0.input,
-			input1: input1.input
-		}
+		return [ ...input0.input, ...input1.input ]
 	}
 
 	static encodeOutput(output) {
@@ -232,10 +254,7 @@ export class Converter {
 		const output0 = Converter.decodeOutput(u8.subarray(0, 1))
 		const output1 = Converter.decodeOutput(u8.subarray(1, 2))
 
-		return {
-			output0: output0.input,
-			output1: output1.input
-		}
+		return [ ...output0.output, ...output1.output ]
 	}
 
 	static decodeDirection(buffer) {
@@ -251,10 +270,7 @@ export class Converter {
 		const direction0 = Converter.decodeDirection(u8.subarray(0, 1))
 		const direction1 = Converter.decodeDirection(u8.subarray(1, 2))
 
-		return {
-			direction0: direction0.input,
-			direction1: direction1.input
-		}
+		return [ ...direction0.direction, ...direction1.direction ]
 	}
 
 	static encodeInterrupt(interrupt) {
@@ -274,9 +290,24 @@ export class Converter {
 		const interrupt0 = Converter.decodeInterrupt(u8.subarray(0, 1))
 		const interrupt1 = Converter.decodeInterrupt(u8.subarray(1, 2))
 
+		return [ ...interrupt0.interrupt, ...interrupt1.interrupt ]
+	}
+
+	static decodePorts(buffer) {
+		const u8 = ArrayBuffer.isView(buffer) ?
+			new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength) :
+			new Uint8Array(buffer)
+
+		const inputs = Converter.decodeInputs(u8.subarray(0, 2))
+		const outputs = Converter.decodeOutputs(u8.subarray(2, 4))
+		const directions = Converter.decodeDirections(u8.subarray(4, 6))
+		const interrupts = Converter.decodeInterrupts(u8.subarray(6, 8))
+
 		return {
-			interrupt0: interrupt0.input,
-			interrupt1: interrupt1.input
+			inputs,
+			outputs,
+			directions,
+			interrupts
 		}
 	}
 }
@@ -287,16 +318,26 @@ export class Common {
 		return Converter.decodeId(buffer)
 	}
 
-	static async reset(aBus) { return aBus.writeI2cBlock(REGISTERS.SOFT_RESET, Uint8Array.from([ 0x00 ])) }
+	static async reset(aBus) { return aBus.writeI2cBlock(REGISTERS.SOFT_RESET, RESET_BUFFER) }
 
-	static async getProfile(aBus) {
-		const buffer = await aBus.readI2cBlock(BLOCKS.PROFILE.OFFSET, BLOCKS.PROFILE.LENGTH)
-		return Converter.decodeProfile(buffer)
+	static async getControl(aBus) {
+		const buffer = await aBus.readI2cBlock(REGISTERS.CONTROL, BYTE_LENGTH_ONE)
+		return Converter.decodeControl(buffer)
 	}
 
 	static async setControl(aBus, control) {
 		const buffer = Converter.encodeControl(control)
 		return aBus.writeI2cBlock(REGISTERS.CONTROL, buffer)
+	}
+
+	static async getMode(aBus, port) {
+		const buffer = await aBus.readI2cBlock(PORTS[port].MODE, BYTE_LENGTH_ONE)
+		return Converter.decodeMode(buffer)
+	}
+
+	static async setMode(aBus, port, mode) {
+		const buffer = Converter.encodeBits(mode)
+		return aBus.writeI2cBlock(PORTS[port].MODE, buffer)
 	}
 
 	static async getInput(aBus, port) {
@@ -309,24 +350,14 @@ export class Common {
 		return Converter.decodeOutput(buffer)
 	}
 
-	static async getDirection(aBus, port) {
-		const buffer = await aBus.readI2cBlock(PORTS[port].DIRECTION, BYTE_LENGTH_ONE)
-		return Converter.decodeDirection(buffer)
-	}
-
-	static async getInterrupt(aBus, port) {
-		const buffer = await aBus.readI2cBlock(PORTS[port].INTERRUPT, BYTE_LENGTH_ONE)
-		return Converter.decodeInterrupt(buffer)
-	}
-
-	static async getDimmings(aBus) {
-		const buffer = await aBus.readI2cBlock(BLOCKS.DIMMING_ALL.OFFSET, BLOCKS.DIMMING_ALL.LENGTH)
-		return Converter.decodeDimmings(buffer)
-	}
-
 	static async setOutput(aBus, port, output) {
 		const buffer = Converter.encodeOutput(output)
 		return aBus.writeI2cBlock(PORTS[port].OUTPUT, buffer)
+	}
+
+	static async getDirection(aBus, port) {
+		const buffer = await aBus.readI2cBlock(PORTS[port].DIRECTION, BYTE_LENGTH_ONE)
+		return Converter.decodeDirection(buffer)
 	}
 
 	static async setDirection(aBus, port, direction) {
@@ -334,14 +365,32 @@ export class Common {
 		return aBus.writeI2cBlock(PORTS[port].DIRECTION, buffer)
 	}
 
+	static async getInterrupt(aBus, port) {
+		const buffer = await aBus.readI2cBlock(PORTS[port].INTERRUPT, BYTE_LENGTH_ONE)
+		return Converter.decodeInterrupt(buffer)
+	}
+
 	static async setInterrupt(aBus, port, interrupt) {
 		const buffer = Converter.encodeInterrupt(interrupt)
 		return aBus.writeI2cBlock(PORTS[port].INTERRUPT, buffer)
 	}
 
-	static async setMode(aBus, port, mode) {
-		const buffer = Converter.encodeBits(mode)
-		return aBus.writeI2cBlock(PORTS[port].MODE, buffer)
+	static async setDimming(aBus, port, pin, dim) {
+		return aBus.writeI2cBlock(DIM_REGISTER_FOR_PORT_PIN[port][pin], Uint8Array.from([ dim ]))
+	}
+
+	// ---
+
+	static async getProfile(aBus) {
+		const buffer = await aBus.readI2cBlock(BLOCKS.PROFILE.OFFSET, BLOCKS.PROFILE.LENGTH)
+		return Converter.decodeProfile(buffer)
+	}
+
+	// ---
+
+	static async getModes(aBus) {
+		const buffer = await aBus.readI2cBlock(BLOCKS.MODE.OFFSET, BLOCKS.MODE.LENGTH)
+		return Converter.decodeModes(buffer)
 	}
 
 	static async getInputs(aBus) {
@@ -363,6 +412,13 @@ export class Common {
 		const buffer = await aBus.readI2cBlock(BLOCKS.INTERRUPT.OFFSET, BLOCKS.INTERRUPT.LENGTH)
 		return Converter.decodeInterrupts(buffer)
 	}
+
+	// ---
+
+	static async getPorts(aBus) {
+		const buffer = await aBus.readI2cBlock(BLOCKS.PORTS_ALL.OFFSET, BLOCKS.PORTS_ALL.LENGTH)
+		return Converter.decodePorts(buffer)
+	}
 }
 
 export class AW9523 {
@@ -371,54 +427,36 @@ export class AW9523 {
 	constructor(aBus) { this.#aBus = aBus }
 
 	async getId() { return Common.getId(this.#aBus) }
-
 	async reset() { return Common.reset(this.#aBus) }
-
-	async getInput(port) { return Common.getInput(this.#aBus, port) }
-
-	async getInputs() { return Common.getInputs(this.#aBus) }
-
-	async getOutput(port) { return Common.getOutput(this.#aBus, port) }
-
-	async getOutputs() { return Common.getOutputs(this.#aBus) }
-
-	async setOutput(port, output) { return Common.setOutput(this.#aBus, port, output) }
-
-	async getDirection(port) { return Common.getDirection(this.#aBus, port) }
-
-	async getDirections() { return Common.getDirections(this.#aBus) }
-
-	async setDirection(port, direction) { return Common.setDirection(this.#aBus, port, direction)}
-
-	async getInterrupt(port) { return Common.getInterrupt(this.#aBus, port) }
-
-	async getInterrupts() { return Common.getInterrupts(this.#aBus) }
-
-	async setInterrupt(port, interrupt) { return Common.setInterrupt(this.#aBus, port, interrupt) }
-
-	async setMode(port, mode) { return Common.setMode(this.#aBus, port, mode) }
-
-	// async getPorts() {}
-
-	// async getModes() {}
-
-	// async getMode(port) { return Common.getMode(this.#aBus, port) }
-
-	// async getControl() { return Common.getControl(this.#aBus) }
 
 	async getProfile() { return Common.getProfile(this.#aBus) }
 
+	async getControl() { return Common.getControl(this.#aBus) }
 	async setControl(control) { return Common.setControl(this.#aBus, control) }
 
-	// async getDimming(port, pin) {}
+	async getMode(port) { return Common.getMode(this.#aBus, port) }
+	async getModes() { return Common.getModes(this.#aBus) }
+	async setMode(port, mode) { return Common.setMode(this.#aBus, port, mode) }
 
-	// async getDimming(dimId) {}
+	async getInput(port) { return Common.getInput(this.#aBus, port) }
+	async getInputs() { return Common.getInputs(this.#aBus) }
 
-	// async setDimming(port, pin, dim) {}
+	async getOutput(port) { return Common.getOutput(this.#aBus, port) }
+	async getOutputs() { return Common.getOutputs(this.#aBus) }
+	async setOutput(port, output) { return Common.setOutput(this.#aBus, port, output) }
 
-	// async setDimming(dimId, dim) {}
+	async getDirection(port) { return Common.getDirection(this.#aBus, port) }
+	async getDirections() { return Common.getDirections(this.#aBus) }
+	async setDirection(port, direction) { return Common.setDirection(this.#aBus, port, direction)}
 
-	async getDimmings() { return Common.getDimmings(this.#aBus) }
+	async getInterrupt(port) { return Common.getInterrupt(this.#aBus, port) }
+	async getInterrupts() { return Common.getInterrupts(this.#aBus) }
+	async setInterrupt(port, interrupt) { return Common.setInterrupt(this.#aBus, port, interrupt) }
 
+	async getPorts() { return Common.getPorts(this.#aBus) }
+	// async setPorts() {}
+
+	async setDimming(port, pin, dim) { return Common.setDimming(this.#aBus, port, pin, dim) }
+	// async setDimmingIdx(dimIdx, dim) {}
 	// async setDimmings(dims) { return Common.setDimmings(this.#aBus, dims)}
 }
